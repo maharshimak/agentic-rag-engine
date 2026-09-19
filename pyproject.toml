@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=84.0.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agentic-rag-engine"
+description = "Inspectable RAG pipeline with text chunking, BM25 retrieval, vector ranking, reciprocal-rank fusion, citations and evaluation."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+version = "1.0.0"
+requires-python = ">=3.12"
+dependencies = [
+  "fastapi>=0.141.1,<1",
+  "pydantic>=2.13.5,<3",
+  "pydantic-settings>=2.15.0,<3",
+  "uvicorn>=0.52.4,<1",
+]
+
+[project.optional-dependencies]
+dev = [
+  "httpx>=0.28.1,<1",
+  "pytest>=9.1.1,<10",
+  "pytest-cov>=7.1.0,<8",
+  "ruff>=0.16.7,<1",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
