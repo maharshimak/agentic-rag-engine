@@ -1,6 +1,8 @@
 # 🧠 Agentic RAG Engine V2
 
-[Live Interactive Demo](https://maharshimak.github.io/makma-ai-os/projects/agentic-rag-engine/) · [AI Systems Lab](https://maharshimak.github.io/makma-ai-os/projects/)
+**A MAK'MA Studio Product · MAK'MA Labs**
+
+[Live Product Demo](https://maharshimak.github.io/makma-ai-os/projects/agentic-rag-engine/) · [MAK'MA Labs](https://maharshimak.github.io/makma-ai-os/projects/)
 
 A inspectable Retrieval-Augmented Generation engine with **document chunking, BM25-style lexical search, semantic retrieval, reciprocal-rank fusion, multi-query planning, transparent reranking, context budgeting, citations, evaluation, FastAPI, Docker, and OpenAI-compatible model adapters**.
 
