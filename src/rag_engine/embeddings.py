@@ -10,7 +10,7 @@ class EmbeddingProvider(Protocol):
 
 
 class HashEmbeddingProvider:
-    """Deterministic, dependency-free embeddings for offline CI and demos."""
+    """Deterministic SHA-256 hash embeddings shared by backend and browser demos."""
 
     def __init__(self, dimensions: int = 256) -> None:
         if dimensions <= 0:
@@ -23,8 +23,8 @@ class HashEmbeddingProvider:
     def _embed_one(self, text: str) -> list[float]:
         vector = [0.0] * self.dimensions
         for token in text.lower().split():
-            digest = hashlib.blake2b(token.encode(), digest_size=8).digest()
-            bucket = int.from_bytes(digest, "big") % self.dimensions
+            digest = hashlib.sha256(token.encode()).digest()
+            bucket = int.from_bytes(digest[:8], "big") % self.dimensions
             sign = -1.0 if digest[0] & 1 else 1.0
             vector[bucket] += sign
         norm = math.sqrt(sum(value * value for value in vector)) or 1.0
