@@ -13,7 +13,7 @@ class HashEmbeddingProvider:
     """Deterministic SHA-256 hash embeddings shared by backend and browser demos."""
 
     def __init__(self, dimensions: int = 256) -> None:
-        if dimensions <= 0:
+        if type(dimensions) is not int or not 1 <= dimensions <= 65536:
             raise ValueError("dimensions must be positive")
         self.dimensions = dimensions
 

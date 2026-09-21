@@ -4,7 +4,29 @@
 
 [Live Product Demo](https://maharshimak.github.io/makma-ai-os/projects/agentic-rag-engine/) · [MAK'MA Labs](https://maharshimak.github.io/makma-ai-os/projects/)
 
-A inspectable Retrieval-Augmented Generation engine with **document chunking, BM25-style lexical search, semantic retrieval, reciprocal-rank fusion, multi-query planning, transparent reranking, context budgeting, citations, evaluation, FastAPI, Docker, and OpenAI-compatible model adapters**.
+An inspectable Retrieval-Augmented Generation engine with **document chunking, BM25-style lexical search, semantic retrieval, reciprocal-rank fusion, multi-query planning, transparent reranking, context budgeting, citations, evaluation, FastAPI, Docker, and OpenAI-compatible model adapters**.
+
+
+## Product contract — engineering upgrade
+
+**Problem and audience:** A retrieval laboratory for engineers comparing evidence rankings against their own small corpus and judgments.
+
+**Live tool:** https://maharshimak.github.io/makma-ai-os/projects/agentic-rag-engine/
+
+**Implemented browser workflow:** Editable text/JSON corpus, strict Top K/Candidate K/BM25/RRF configuration, planned queries, per-stage scores, cited context, comparable baseline rankings and JSON export. No judgments displays N/A rather than a fake zero-quality score.
+
+**Backend and parity contract:** Python and browser use SHA-256 token bytes, 256 buckets, digest sign bit, L2 normalization, BM25, RRF and transparent overlap reranking. Fixed fixtures execute the Python packages and compare JS outputs. Internal no-judgment convention: recall=1, precision=0, MRR=0, hit=0. Python additionally chunks documents, budgets context and supports external providers; the browser ranks supplied documents directly.
+
+**Architecture:** `makma-ai-os/demo` is the shared web product source and Pages deployment. This repository owns its Python domain package. The central `tests/e2e` suite exercises all nine products; `tests/fixtures/python-parity.json` plus `scripts/generate_parity.py` guard shared mathematical contracts. Backend revisions used for regeneration are pinned in the central `backend-lock.json`.
+
+**Safety and limitations:** Hash vectors are lexical hashing, not learned semantic embeddings. Browser limits: 200 documents, 100000 corpus characters, 2000 query characters. Baseline comparisons require identical corpus/query/judgments. Inputs are validated, rendered user values are escaped, and deterministic results are not presented as model inference.
+
+**Verification:** Run `python -m ruff check .` and `python -m pytest -q`. `tests/test_engineering_upgrade.py` protects the new rejection/correctness paths. Central web checks: `npm ci`, `npm test`, `npm run build`, `npx playwright install --with-deps chromium`, `npm run test:e2e`. CI gates publishing on browser interactions and validates all public URLs after deployment.
+
+**Highest-value next work:** Labeled domain benchmarks, persistent vector storage and calibrated trained reranking.
+
+**Provenance:** Independent MAK’MA Studio engineering implementation; examples are synthetic and no employer code or data is included. Existing MIT license applies.
+
 
 ## Architecture
 
