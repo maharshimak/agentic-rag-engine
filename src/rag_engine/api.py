@@ -1,33 +1,74 @@
+import os
+import secrets
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel, Field
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
+from pydantic import BaseModel, ConfigDict, Field
 
 from rag_engine.models import Document
 from rag_engine.settings import build_engine
 
 
 class DocumentInput(BaseModel):
-    id: str
-    text: str
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(min_length=1, max_length=500)
+    text: str = Field(min_length=1, max_length=1_000_000)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class IndexRequest(BaseModel):
-    documents: list[DocumentInput]
+    model_config = ConfigDict(extra="forbid")
+
+    documents: list[DocumentInput] = Field(min_length=1, max_length=500)
 
 
 class QueryRequest(BaseModel):
-    query: str
+    model_config = ConfigDict(extra="forbid")
+
+    query: str = Field(min_length=1, max_length=10_000)
     top_k: int = Field(default=5, ge=1, le=50)
 
 
 app = FastAPI(
     title="Agentic RAG Engine",
-    version="1.0.0",
-    description="Hybrid retrieval, query planning, reranking, citations and evaluation.",
+    version="1.1.0",
+    description=(
+        "Hybrid retrieval, query planning, reranking, citations, persistence and "
+        "optional bearer-protected service access."
+    ),
 )
 engine = build_engine()
+
+
+async def require_auth(
+    request: Request,
+    authorization: str | None = Header(default=None),
+) -> None:
+    token = os.environ.get("RAG_API_TOKEN")
+    if token:
+        scheme, _, supplied = (authorization or "").partition(" ")
+        if (
+            scheme.lower() != "bearer"
+            or not supplied
+            or not secrets.compare_digest(supplied, token)
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Valid bearer token required.",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        return
+
+    client_host = request.client.host if request.client else ""
+    if client_host not in {"127.0.0.1", "::1", "localhost", "testclient"}:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Remote access requires RAG_API_TOKEN.",
+        )
+
+
+protected = [Depends(require_auth)]
 
 
 @app.get("/health")
@@ -35,7 +76,7 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
-@app.post("/v1/documents/index")
+@app.post("/v1/documents/index", dependencies=protected)
 def index_documents(request: IndexRequest) -> dict[str, int]:
     documents = [
         Document(id=item.id, text=item.text, metadata=item.metadata) for item in request.documents
@@ -44,7 +85,7 @@ def index_documents(request: IndexRequest) -> dict[str, int]:
     return {"documents": len(documents), "chunks": chunk_count}
 
 
-@app.post("/v1/retrieve")
+@app.post("/v1/retrieve", dependencies=protected)
 def retrieve(request: QueryRequest) -> dict[str, object]:
     try:
         results, trace = engine.retrieve(request.query, top_k=request.top_k)
@@ -75,7 +116,7 @@ def retrieve(request: QueryRequest) -> dict[str, object]:
     }
 
 
-@app.post("/v1/answer")
+@app.post("/v1/answer", dependencies=protected)
 def answer(request: QueryRequest) -> dict[str, object]:
     try:
         result = engine.answer(request.query, top_k=request.top_k)
