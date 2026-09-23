@@ -1,6 +1,9 @@
 import hashlib
 import json
 import math
+import sqlite3
+from contextlib import closing
+from pathlib import Path
 from typing import Protocol
 from urllib import request
 
@@ -56,3 +59,83 @@ class OpenAICompatibleEmbeddingProvider:
             data = json.loads(response.read().decode())
         ordered = sorted(data["data"], key=lambda item: item["index"])
         return [item["embedding"] for item in ordered]
+
+
+class SQLiteCachedEmbeddingProvider:
+    """Persistent content-addressed cache around any embedding provider."""
+
+    def __init__(
+        self,
+        provider: EmbeddingProvider,
+        path: str | Path,
+        *,
+        namespace: str = "default",
+    ) -> None:
+        if not namespace.strip():
+            raise ValueError("namespace must be non-empty")
+        self.provider = provider
+        self.path = str(Path(path))
+        self.namespace = namespace
+        Path(self.path).expanduser().parent.mkdir(parents=True, exist_ok=True)
+        with closing(sqlite3.connect(self.path)) as connection:
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS embedding_cache (
+                    cache_key TEXT PRIMARY KEY,
+                    vector_json TEXT NOT NULL
+                )
+                """
+            )
+            connection.commit()
+
+    def _key(self, text: str) -> str:
+        payload = (self.namespace + "\0" + text).encode()
+        return hashlib.sha256(payload).hexdigest()
+
+    def embed(self, texts: list[str]) -> list[list[float]]:
+        if not texts:
+            return []
+        keys = [self._key(text) for text in texts]
+        cached: dict[str, list[float]] = {}
+        with closing(sqlite3.connect(self.path)) as connection:
+            placeholders = ",".join("?" for _ in keys)
+            rows = connection.execute(
+                f"SELECT cache_key, vector_json FROM embedding_cache "
+                f"WHERE cache_key IN ({placeholders})",
+                keys,
+            ).fetchall()
+        for key, vector_json in rows:
+            vector = json.loads(vector_json)
+            if not isinstance(vector, list) or not vector:
+                continue
+            cached[str(key)] = [float(value) for value in vector]
+
+        missing_positions = [index for index, key in enumerate(keys) if key not in cached]
+        if missing_positions:
+            missing_texts = [texts[index] for index in missing_positions]
+            generated = self.provider.embed(missing_texts)
+            if len(generated) != len(missing_texts):
+                raise ValueError("Embedding provider returned the wrong number of vectors.")
+            inserts: list[tuple[str, str]] = []
+            for index, vector in zip(missing_positions, generated, strict=True):
+                normalized = [float(value) for value in vector]
+                if not normalized or not all(math.isfinite(value) for value in normalized):
+                    raise ValueError("Embedding vectors must be non-empty and finite.")
+                cached[keys[index]] = normalized
+                inserts.append(
+                    (
+                        keys[index],
+                        json.dumps(normalized, separators=(",", ":")),
+                    )
+                )
+            with closing(sqlite3.connect(self.path)) as connection, connection:
+                connection.executemany(
+                    """
+                    INSERT INTO embedding_cache(cache_key, vector_json)
+                    VALUES (?, ?)
+                    ON CONFLICT(cache_key) DO UPDATE SET vector_json = excluded.vector_json
+                    """,
+                    inserts,
+                )
+
+        return [cached[key] for key in keys]
