@@ -1,3 +1,4 @@
+from rag_engine.embeddings import SQLiteCachedEmbeddingProvider
 from rag_engine.evaluation import (
     evaluate_retrieval,
     hit_rate_at_k,
@@ -15,6 +16,7 @@ __all__ = [
     "DocumentStore",
     "RAGEngine",
     "RetrievalTrace",
+    "SQLiteCachedEmbeddingProvider",
     "SQLiteDocumentStore",
     "ScoredChunk",
     "evaluate_retrieval",
