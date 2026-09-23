@@ -50,6 +50,7 @@ G --> A[Answer + Citations]
 - real BM25-style lexical index
 - deterministic offline embedding provider for reproducible CI
 - optional SQLite source-document persistence with reload-on-start and persistent deletion
+- optional persistent content-addressed SQLite embedding cache to avoid re-embedding unchanged chunks
 - OpenAI-compatible `/v1/embeddings` adapter for real local/cloud embedding servers
 - cosine semantic retrieval
 - reciprocal-rank fusion across lexical, semantic and planned-query rankings
@@ -114,7 +115,7 @@ Built as an engineering portfolio project focused on production GenAI systems.
 
 ## Scope and limitations
 
-Offline embeddings use token hashing, not a trained semantic model. The reranker and query planner are deterministic heuristics. Retrieval indexes still live in memory and are rebuilt when documents change; source documents can optionally persist in SQLite and are reloaded on engine startup. Input is already-extracted text; PDF/OCR/HTML ingestion is not implemented. Citations identify supplied context but do not establish answer faithfulness. The small synthetic retrieval test is a regression fixture, not a general retrieval benchmark. Remote adapters require an independently hosted compatible service and are not validated against live providers by offline CI.
+Offline embeddings use token hashing, not a trained semantic model. The reranker and query planner are deterministic heuristics. Retrieval indexes still live in memory and are rebuilt when documents change; source documents can optionally persist in SQLite and are reloaded on engine startup. When a real or local embedding provider is wrapped by `SQLiteCachedEmbeddingProvider`, unchanged text embeddings persist across rebuilds and process restarts. Input is already-extracted text; PDF/OCR/HTML ingestion is not implemented. Citations identify supplied context but do not establish answer faithfulness. The small synthetic retrieval test is a regression fixture, not a general retrieval benchmark. Remote adapters require an independently hosted compatible service and are not validated against live providers by offline CI.
 
 ## Installation and development
 
