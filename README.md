@@ -93,6 +93,7 @@ export RAG_EMBEDDING_MODEL=nomic-embed-text
 export RAG_CHAT_BASE_URL=http://localhost:11434
 export RAG_CHAT_MODEL=qwen3
 export RAG_API_KEY=
+export RAG_API_TOKEN=replace-with-a-long-random-token
 ```
 
 The engine automatically switches from the deterministic offline providers to the configured model endpoints.
@@ -153,7 +154,7 @@ See [.env.example](.env.example). Export variables into the process environment;
 python -m uvicorn rag_engine.api:app --host 127.0.0.1 --port 8000
 ```
 
-Interactive endpoint schemas are at `http://127.0.0.1:8000/docs`; machine-readable schemas are at `/openapi.json`. These APIs have no built-in authentication. Use trusted local data and local access.
+Interactive endpoint schemas are at `http://127.0.0.1:8000/docs`; machine-readable schemas are at `/openapi.json`. The API is local-only by default. Set `RAG_API_TOKEN` to enable bearer-authenticated remote access; all non-health endpoints then require `Authorization: Bearer <token>`.
 
 ## Container
 
