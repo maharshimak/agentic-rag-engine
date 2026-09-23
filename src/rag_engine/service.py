@@ -7,6 +7,7 @@ from rag_engine.embeddings import EmbeddingProvider
 from rag_engine.generation import ExtractiveGenerator, Generator
 from rag_engine.models import Document, RetrievalTrace, ScoredChunk
 from rag_engine.retrieval import HybridRetriever
+from rag_engine.storage import DocumentStore
 
 
 class RAGEngine:
@@ -17,18 +18,24 @@ class RAGEngine:
         chunk_size: int = 180,
         overlap: int = 30,
         context_tokens: int = 700,
+        document_store: DocumentStore | None = None,
     ) -> None:
         self.embedding_provider = embedding_provider
         self.generator = generator or ExtractiveGenerator()
         self.chunk_size = chunk_size
         self.overlap = overlap
         self.context_builder = ContextBuilder(max_tokens=context_tokens)
-        self.documents: dict[str, Document] = {}
+        self.document_store = document_store
+        stored = document_store.list_documents() if document_store is not None else []
+        self.documents: dict[str, Document] = {document.id: document for document in stored}
         self._agent: AgenticRetriever | None = None
+        if self.documents:
+            self._rebuild_index()
 
-    def index(self, documents: list[Document]) -> int:
-        for document in documents:
-            self.documents[document.id] = document
+    def _rebuild_index(self) -> int:
+        if not self.documents:
+            self._agent = None
+            return 0
         chunks = chunk_documents(
             list(self.documents.values()),
             chunk_size=self.chunk_size,
@@ -38,6 +45,28 @@ class RAGEngine:
             HybridRetriever(chunks, embedding_provider=self.embedding_provider)
         )
         return len(chunks)
+
+    def index(self, documents: list[Document]) -> int:
+        if not documents:
+            return self._rebuild_index()
+        if len({document.id for document in documents}) != len(documents):
+            raise ValueError("Document IDs must be unique within an index batch.")
+        for document in documents:
+            if not document.id.strip() or not document.text.strip():
+                raise ValueError("Documents require non-empty IDs and text.")
+            self.documents[document.id] = document
+        if self.document_store is not None:
+            self.document_store.upsert_many(documents)
+        return self._rebuild_index()
+
+    def delete(self, document_id: str) -> bool:
+        if document_id not in self.documents:
+            return False
+        del self.documents[document_id]
+        if self.document_store is not None:
+            self.document_store.delete(document_id)
+        self._rebuild_index()
+        return True
 
     def retrieve(
         self,
