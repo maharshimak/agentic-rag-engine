@@ -66,24 +66,22 @@ class SQLiteDocumentStore:
             )
             for document in documents
         ]
-        with closing(sqlite3.connect(self.path)) as connection:
-            with connection:
-                connection.executemany(
-                    """
-                    INSERT INTO documents(id, text, metadata_json)
-                    VALUES (?, ?, ?)
-                    ON CONFLICT(id) DO UPDATE SET
-                        text = excluded.text,
-                        metadata_json = excluded.metadata_json
-                    """,
-                    payload,
-                )
+        with closing(sqlite3.connect(self.path)) as connection, connection:
+            connection.executemany(
+                """
+                INSERT INTO documents(id, text, metadata_json)
+                VALUES (?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    text = excluded.text,
+                    metadata_json = excluded.metadata_json
+                """,
+                payload,
+            )
 
     def delete(self, document_id: str) -> bool:
-        with closing(sqlite3.connect(self.path)) as connection:
-            with connection:
-                cursor = connection.execute(
-                    "DELETE FROM documents WHERE id = ?",
-                    (document_id,),
-                )
+        with closing(sqlite3.connect(self.path)) as connection, connection:
+            cursor = connection.execute(
+                "DELETE FROM documents WHERE id = ?",
+                (document_id,),
+            )
         return cursor.rowcount == 1
