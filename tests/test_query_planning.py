@@ -17,5 +17,5 @@ def test_model_query_planner_preserves_original_and_deduplicates():
 
 
 def test_model_query_planner_rejects_non_text_queries():
-    with pytest.raises(ValueError):
+    with pytest.raises(TypeError):
         OpenAICompatibleQueryPlanner.parse("query", '{"queries":[42]}')
