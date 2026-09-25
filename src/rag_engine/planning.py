@@ -65,12 +65,12 @@ class OpenAICompatibleQueryPlanner:
             raise ValueError("Query planner returned invalid JSON.") from error
         queries = payload.get("queries")
         if not isinstance(queries, list):
-            raise ValueError("Query planner JSON must contain a queries array.")
+            raise TypeError("Query planner JSON must contain a queries array.")
         cleaned: list[str] = []
         original = " ".join(query.split())
         for item in [original, *queries]:
             if not isinstance(item, str):
-                raise ValueError("Every planned query must be text.")
+                raise TypeError("Every planned query must be text.")
             normalized = " ".join(item.split())
             if normalized and normalized.casefold() not in {x.casefold() for x in cleaned}:
                 cleaned.append(normalized)
