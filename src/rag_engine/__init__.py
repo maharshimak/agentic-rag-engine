@@ -1,3 +1,4 @@
+from rag_engine.advanced import MMRDiversityReranker
 from rag_engine.embeddings import SQLiteCachedEmbeddingProvider
 from rag_engine.evaluation import (
     evaluate_retrieval,
@@ -14,6 +15,7 @@ __all__ = [
     "Chunk",
     "Document",
     "DocumentStore",
+    "MMRDiversityReranker",
     "RAGEngine",
     "RetrievalTrace",
     "SQLiteCachedEmbeddingProvider",
