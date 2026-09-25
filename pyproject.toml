@@ -24,6 +24,7 @@ dev = [
   "pytest-cov>=7.1.0,<8",
   "ruff>=0.16.7,<1",
 ]
+reranking = ["sentence-transformers>=6.1.0,<7"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
