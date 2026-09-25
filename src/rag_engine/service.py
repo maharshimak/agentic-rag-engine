@@ -5,8 +5,8 @@ from rag_engine.chunking import chunk_documents
 from rag_engine.context import ContextBuilder
 from rag_engine.embeddings import EmbeddingProvider
 from rag_engine.generation import ExtractiveGenerator, Generator
-from rag_engine.rerank import TransparentReranker
 from rag_engine.models import Document, RetrievalTrace, ScoredChunk
+from rag_engine.rerank import TransparentReranker
 from rag_engine.retrieval import HybridRetriever
 from rag_engine.storage import DocumentStore
 
