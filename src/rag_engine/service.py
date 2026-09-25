@@ -1,10 +1,11 @@
 from time import perf_counter
 
-from rag_engine.agent import AgenticRetriever
+from rag_engine.agent import AgenticRetriever, QueryPlanner
 from rag_engine.chunking import chunk_documents
 from rag_engine.context import ContextBuilder
 from rag_engine.embeddings import EmbeddingProvider
 from rag_engine.generation import ExtractiveGenerator, Generator
+from rag_engine.rerank import TransparentReranker
 from rag_engine.models import Document, RetrievalTrace, ScoredChunk
 from rag_engine.retrieval import HybridRetriever
 from rag_engine.storage import DocumentStore
@@ -15,6 +16,8 @@ class RAGEngine:
         self,
         embedding_provider: EmbeddingProvider | None = None,
         generator: Generator | None = None,
+        query_planner: QueryPlanner | None = None,
+        reranker: TransparentReranker | None = None,
         chunk_size: int = 180,
         overlap: int = 30,
         context_tokens: int = 700,
@@ -22,6 +25,8 @@ class RAGEngine:
     ) -> None:
         self.embedding_provider = embedding_provider
         self.generator = generator or ExtractiveGenerator()
+        self.query_planner = query_planner
+        self.reranker = reranker
         self.chunk_size = chunk_size
         self.overlap = overlap
         self.context_builder = ContextBuilder(max_tokens=context_tokens)
@@ -42,7 +47,9 @@ class RAGEngine:
             overlap=self.overlap,
         )
         self._agent = AgenticRetriever(
-            HybridRetriever(chunks, embedding_provider=self.embedding_provider)
+            HybridRetriever(chunks, embedding_provider=self.embedding_provider),
+            planner=self.query_planner,
+            reranker=self.reranker,
         )
         return len(chunks)
 
