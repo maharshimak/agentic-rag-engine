@@ -4,7 +4,14 @@ from rag_engine.models import Chunk, ScoredChunk
 
 def scored(doc: str, score: float) -> ScoredChunk:
     return ScoredChunk(
-        chunk=Chunk(id=f"{doc}-c", document_id=doc, text="evidence", metadata={}),
+        chunk=Chunk(
+            id=f"{doc}-c",
+            document_id=doc,
+            text="evidence",
+            start_token=0,
+            end_token=1,
+            metadata={},
+        ),
         score=score,
         lexical_score=score,
         semantic_score=score,
