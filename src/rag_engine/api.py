@@ -3,7 +3,7 @@ import secrets
 from typing import Any
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from rag_engine.models import Document
 from rag_engine.settings import build_engine
@@ -20,7 +20,14 @@ class DocumentInput(BaseModel):
 class IndexRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    documents: list[DocumentInput] = Field(min_length=1, max_length=500)
+    documents: list[DocumentInput] = Field(min_length=1, max_length=100)
+
+    @model_validator(mode="after")
+    def bounded_payload(self):
+        total_chars = sum(len(document.text) for document in self.documents)
+        if total_chars > 20_000_000:
+            raise ValueError("Index payload exceeds the 20,000,000 character aggregate limit.")
+        return self
 
 
 class QueryRequest(BaseModel):
@@ -61,7 +68,15 @@ async def require_auth(
         return
 
     client_host = request.client.host if request.client else ""
-    if client_host not in {"127.0.0.1", "::1", "localhost", "testclient"}:
+    host_header = request.headers.get("host", "").casefold()
+    local_host = (
+        host_header in {"localhost", "127.0.0.1", "[::1]", "testserver"}
+        or host_header.startswith(("localhost:", "127.0.0.1:", "[::1]:"))
+    )
+    if (
+        client_host not in {"127.0.0.1", "::1", "localhost", "testclient"}
+        or not local_host
+    ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Remote access requires RAG_API_TOKEN.",
