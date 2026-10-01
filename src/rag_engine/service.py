@@ -1,3 +1,4 @@
+from threading import RLock
 from time import perf_counter
 
 from rag_engine.agent import AgenticRetriever, QueryPlanner
@@ -31,6 +32,7 @@ class RAGEngine:
         self.overlap = overlap
         self.context_builder = ContextBuilder(max_tokens=context_tokens)
         self.document_store = document_store
+        self._lock = RLock()
         stored = document_store.list_documents() if document_store is not None else []
         self.documents: dict[str, Document] = {document.id: document for document in stored}
         self._agent: AgenticRetriever | None = None
@@ -38,53 +40,60 @@ class RAGEngine:
             self._rebuild_index()
 
     def _rebuild_index(self) -> int:
-        if not self.documents:
-            self._agent = None
-            return 0
-        chunks = chunk_documents(
-            list(self.documents.values()),
-            chunk_size=self.chunk_size,
-            overlap=self.overlap,
-        )
-        self._agent = AgenticRetriever(
-            HybridRetriever(chunks, embedding_provider=self.embedding_provider),
-            planner=self.query_planner,
-            reranker=self.reranker,
-        )
-        return len(chunks)
+        with self._lock:
+            if not self.documents:
+                self._agent = None
+                return 0
+            chunks = chunk_documents(
+                list(self.documents.values()),
+                chunk_size=self.chunk_size,
+                overlap=self.overlap,
+            )
+            next_agent = AgenticRetriever(
+                HybridRetriever(chunks, embedding_provider=self.embedding_provider),
+                planner=self.query_planner,
+                reranker=self.reranker,
+            )
+            # Swap the immutable retrieval snapshot only after the full rebuild.
+            self._agent = next_agent
+            return len(chunks)
 
     def index(self, documents: list[Document]) -> int:
         if not documents:
             return self._rebuild_index()
         if len({document.id for document in documents}) != len(documents):
             raise ValueError("Document IDs must be unique within an index batch.")
-        for document in documents:
-            if not document.id.strip() or not document.text.strip():
-                raise ValueError("Documents require non-empty IDs and text.")
-            self.documents[document.id] = document
-        if self.document_store is not None:
-            self.document_store.upsert_many(documents)
-        return self._rebuild_index()
+        with self._lock:
+            for document in documents:
+                if not document.id.strip() or not document.text.strip():
+                    raise ValueError("Documents require non-empty IDs and text.")
+                self.documents[document.id] = document
+            if self.document_store is not None:
+                self.document_store.upsert_many(documents)
+            return self._rebuild_index()
 
     def delete(self, document_id: str) -> bool:
-        if document_id not in self.documents:
-            return False
-        del self.documents[document_id]
-        if self.document_store is not None:
-            self.document_store.delete(document_id)
-        self._rebuild_index()
-        return True
+        with self._lock:
+            if document_id not in self.documents:
+                return False
+            del self.documents[document_id]
+            if self.document_store is not None:
+                self.document_store.delete(document_id)
+            self._rebuild_index()
+            return True
 
     def retrieve(
         self,
         query: str,
         top_k: int = 5,
     ) -> tuple[list[ScoredChunk], RetrievalTrace]:
-        if self._agent is None:
+        with self._lock:
+            agent = self._agent
+        if agent is None:
             raise RuntimeError("No documents have been indexed")
 
         started = perf_counter()
-        results, planned_queries, candidate_count = self._agent.retrieve(
+        results, planned_queries, candidate_count = agent.retrieve(
             query,
             top_k=top_k,
         )
