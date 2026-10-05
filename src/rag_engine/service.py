@@ -1,8 +1,10 @@
+from dataclasses import asdict
 from threading import RLock
 from time import perf_counter
 
 from rag_engine.agent import AgenticRetriever, QueryPlanner
 from rag_engine.chunking import chunk_documents
+from rag_engine.confidence import assess_retrieval_confidence
 from rag_engine.context import ContextBuilder
 from rag_engine.embeddings import EmbeddingProvider
 from rag_engine.generation import ExtractiveGenerator, Generator
@@ -23,7 +25,10 @@ class RAGEngine:
         overlap: int = 30,
         context_tokens: int = 700,
         document_store: DocumentStore | None = None,
+        abstain_threshold: float = 0.45,
     ) -> None:
+        if not 0 <= abstain_threshold <= 1:
+            raise ValueError("abstain_threshold must be between 0 and 1")
         self.embedding_provider = embedding_provider
         self.generator = generator or ExtractiveGenerator()
         self.query_planner = query_planner
@@ -32,6 +37,7 @@ class RAGEngine:
         self.overlap = overlap
         self.context_builder = ContextBuilder(max_tokens=context_tokens)
         self.document_store = document_store
+        self.abstain_threshold = abstain_threshold
         self._lock = RLock()
         stored = document_store.list_documents() if document_store is not None else []
         self.documents: dict[str, Document] = {document.id: document for document in stored}
@@ -54,7 +60,6 @@ class RAGEngine:
                 planner=self.query_planner,
                 reranker=self.reranker,
             )
-            # Swap the immutable retrieval snapshot only after the full rebuild.
             self._agent = next_agent
             return len(chunks)
 
@@ -109,12 +114,23 @@ class RAGEngine:
 
     def answer(self, query: str, top_k: int = 5) -> dict[str, object]:
         results, trace = self.retrieve(query, top_k=top_k)
+        confidence = assess_retrieval_confidence(results)
         context = self.context_builder.build(results)
-        answer = self.generator.generate(query, context)
+
+        abstained = confidence.score < self.abstain_threshold
+        if abstained:
+            answer = (
+                "I do not have enough independent evidence in the indexed documents "
+                "to answer this reliably."
+            )
+        else:
+            answer = self.generator.generate(query, context)
 
         return {
             "answer": answer,
             "citations": context.citations,
             "context": context.text,
             "trace": trace,
+            "confidence": asdict(confidence),
+            "abstained": abstained,
         }
