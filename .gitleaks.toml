@@ -1,0 +1,10 @@
+title = "Repository Gitleaks configuration"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Known historical false positive: empty RAG_API_KEY placeholder in .env.example"
+condition = "AND"
+commits = ["20714a59be71778bd009db88442a33f88bf79ae4"]
+paths = ['''^\.env\.example$''']
