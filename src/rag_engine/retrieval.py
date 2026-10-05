@@ -1,3 +1,6 @@
+from __future__ import annotations
+
+import re
 from collections import Counter
 from dataclasses import replace
 from math import isfinite, log, sqrt
@@ -7,7 +10,11 @@ from rag_engine.models import Chunk, ScoredChunk
 
 
 def tokenize(text: str) -> list[str]:
-    return [token.strip(".,!?;:()[]{}\"'").lower() for token in text.split() if token.strip()]
+    return [
+        token.casefold()
+        for token in re.findall(r"[\w.-]+", text, flags=re.UNICODE)
+        if token.strip("._-")
+    ]
 
 
 def cosine_similarity(a: list[float], b: list[float]) -> float:
@@ -76,30 +83,43 @@ class VectorIndex:
         if not self.chunks:
             return []
         query_vector = self.provider.embed([query])[0]
-        scored = [
-            ScoredChunk(
-                chunk=chunk,
-                score=cosine_similarity(query_vector, vector),
-                semantic_score=cosine_similarity(query_vector, vector),
+        scored: list[ScoredChunk] = []
+        for chunk, vector in zip(self.chunks, self.vectors):
+            score = cosine_similarity(query_vector, vector)
+            scored.append(
+                ScoredChunk(
+                    chunk=chunk,
+                    score=score,
+                    semantic_score=score,
+                )
             )
-            for chunk, vector in zip(self.chunks, self.vectors)
-        ]
         return sorted(scored, key=lambda item: item.score, reverse=True)[:top_k]
 
 
 def reciprocal_rank_fusion(
     rankings: list[list[ScoredChunk]],
     k: int = 60,
+    *,
+    weights: list[float] | None = None,
 ) -> list[ScoredChunk]:
+    if isinstance(k, bool) or not isinstance(k, int) or k <= 0:
+        raise ValueError("k must be a positive integer.")
+    if weights is None:
+        weights = [1.0] * len(rankings)
+    if len(weights) != len(rankings):
+        raise ValueError("weights must match the number of rankings.")
+    if any(not isfinite(weight) or weight <= 0 for weight in weights):
+        raise ValueError("fusion weights must be finite and positive.")
+
     fused: dict[str, float] = {}
     by_id: dict[str, ScoredChunk] = {}
     lexical: dict[str, float] = {}
     semantic: dict[str, float] = {}
 
-    for ranking in rankings:
+    for ranking, weight in zip(rankings, weights, strict=True):
         for position, item in enumerate(ranking, start=1):
             chunk_id = item.chunk.id
-            fused[chunk_id] = fused.get(chunk_id, 0.0) + 1.0 / (k + position)
+            fused[chunk_id] = fused.get(chunk_id, 0.0) + weight / (k + position)
             by_id[chunk_id] = item
             lexical[chunk_id] = max(lexical.get(chunk_id, 0.0), item.lexical_score)
             semantic[chunk_id] = max(semantic.get(chunk_id, 0.0), item.semantic_score)
@@ -119,14 +139,49 @@ def reciprocal_rank_fusion(
     )
 
 
+def adaptive_hybrid_weights(query: str) -> tuple[float, float]:
+    """Choose transparent lexical/semantic weights from query characteristics."""
+    tokens = tokenize(query)
+    if not tokens:
+        return 1.0, 1.0
+
+    quoted = bool(re.search(r'["\'][^"\']+["\']', query))
+    identifier_like = any(
+        any(character.isdigit() for character in token)
+        or "_" in token
+        or "." in token
+        or "-" in token
+        for token in tokens
+    )
+    if quoted or identifier_like:
+        return 1.35, 0.85
+
+    if len(tokens) >= 9:
+        return 0.9, 1.2
+
+    return 1.0, 1.0
+
+
 class HybridRetriever:
     def __init__(
         self,
         chunks: list[Chunk],
         embedding_provider: EmbeddingProvider | None = None,
+        *,
+        adaptive_weights: bool = True,
+        lexical_weight: float = 1.0,
+        semantic_weight: float = 1.0,
     ) -> None:
+        if any(
+            not isfinite(weight) or weight <= 0
+            for weight in (lexical_weight, semantic_weight)
+        ):
+            raise ValueError("retrieval weights must be finite and positive.")
         self.lexical = BM25Index(chunks)
         self.semantic = VectorIndex(chunks, provider=embedding_provider)
+        self.adaptive_weights = adaptive_weights
+        self.lexical_weight = lexical_weight
+        self.semantic_weight = semantic_weight
 
     def retrieve(
         self,
@@ -134,10 +189,16 @@ class HybridRetriever:
         top_k: int = 5,
         candidate_k: int = 20,
     ) -> list[ScoredChunk]:
+        lexical_weight, semantic_weight = (
+            adaptive_hybrid_weights(query)
+            if self.adaptive_weights
+            else (self.lexical_weight, self.semantic_weight)
+        )
         fused = reciprocal_rank_fusion(
             [
                 self.lexical.search(query, top_k=candidate_k),
                 self.semantic.search(query, top_k=candidate_k),
-            ]
+            ],
+            weights=[lexical_weight, semantic_weight],
         )
         return fused[:top_k]
