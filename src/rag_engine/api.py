@@ -39,10 +39,10 @@ class QueryRequest(BaseModel):
 
 app = FastAPI(
     title="Agentic RAG Engine",
-    version="1.1.0",
+    version="1.2.0",
     description=(
-        "Hybrid retrieval, query planning, reranking, citations, persistence and "
-        "optional bearer-protected service access."
+        "Adaptive hybrid retrieval, query planning, reranking, evidence confidence, "
+        "citations, persistence and optional bearer-protected service access."
     ),
 )
 engine = build_engine()
@@ -143,6 +143,8 @@ def answer(request: QueryRequest) -> dict[str, object]:
         "answer": result["answer"],
         "citations": result["citations"],
         "context": result["context"],
+        "confidence": result["confidence"],
+        "abstained": result["abstained"],
         "trace": {
             "query": trace.query,
             "planned_queries": trace.planned_queries,
