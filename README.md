@@ -110,13 +110,13 @@ This repository is intentionally built beyond the common `embed → vector searc
 - ingestion workers for PDF/HTML/Markdown
 - groundedness and citation-faithfulness evaluation
 - OpenTelemetry-compatible tracing
-- benchmark datasets and regression gates
+- representative domain-labeled benchmarks and production regression gates (a minimal offline synthetic regression fixture is now available)
 
 Built as an engineering portfolio project focused on production GenAI systems.
 
 ## Scope and limitations
 
-Offline embeddings use token hashing, not a trained semantic model. The reranker and query planner are deterministic heuristics. Retrieval indexes still live in memory and are rebuilt when documents change; source documents can optionally persist in SQLite and are reloaded on engine startup. When a real or local embedding provider is wrapped by `SQLiteCachedEmbeddingProvider`, unchanged text embeddings persist across rebuilds and process restarts. Input is already-extracted text; PDF/OCR/HTML ingestion is not implemented. Citations identify supplied context but do not establish answer faithfulness. The small synthetic retrieval test is a regression fixture, not a general retrieval benchmark. Remote adapters require an independently hosted compatible service and are not validated against live providers by offline CI.
+Offline embeddings use token hashing, not a trained semantic model. The reranker and query planner are deterministic heuristics. Retrieval indexes still live in memory and are rebuilt when documents change; source documents can optionally persist in SQLite and are reloaded on engine startup. When a real or local embedding provider is wrapped by `SQLiteCachedEmbeddingProvider`, unchanged text embeddings persist across rebuilds and process restarts. Input is already-extracted text; PDF/OCR/HTML ingestion is not implemented. Citations identify supplied context but do not establish answer faithfulness. The six-case synthetic offline retrieval benchmark is a CI regression fixture, not a general retrieval or answer-quality benchmark. Remote adapters require an independently hosted compatible service and are not validated against live providers by offline CI.
 
 ## Installation and development
 
@@ -175,7 +175,7 @@ docker run --rm -p 127.0.0.1:8000:8000 agentic-rag-engine
 
 ## Next engineering work
 
-Persistent index adapter; labeled retrieval benchmark; citation-faithfulness checks; trained reranker; background ingestion. These are planned work, not current capabilities.
+Persistent index adapter; representative domain-labeled retrieval benchmark; citation-faithfulness checks; trained reranker; background ingestion. These are planned work, not current capabilities.
 
 ## Contributing and security
 
@@ -184,3 +184,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) and [SECURITY.md](SECURITY.md). CI runs o
 ## License and provenance
 
 [MIT](LICENSE), copyright 2026 Maharshi Patel. This public portfolio implementation is independent of employer systems and contains no confidential employer code or data. Examples and test fixtures are synthetic.
+
+## Offline retrieval benchmark
+
+Run `python -m scripts.benchmark_retrieval` from the repository root after installing the package. It evaluates six **synthetic**, distinct-topic retrieval cases using offline engines and reports Hit@3, MRR, and uncalibrated per-query elapsed time as JSON. CI asserts a basic ranking contract. It does **not** measure performance on customer data, true semantic retrieval quality, trained embedding quality, or real-world latency. Such claims require representative labeled data and provider benchmarks.
