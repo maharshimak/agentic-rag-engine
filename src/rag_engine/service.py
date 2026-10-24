@@ -45,23 +45,25 @@ class RAGEngine:
         if self.documents:
             self._rebuild_index()
 
+    def _build_index(self, documents: dict[str, Document]) -> tuple[AgenticRetriever | None, int]:
+        if not documents:
+            return None, 0
+        chunks = chunk_documents(
+            list(documents.values()),
+            chunk_size=self.chunk_size,
+            overlap=self.overlap,
+        )
+        agent = AgenticRetriever(
+            HybridRetriever(chunks, embedding_provider=self.embedding_provider),
+            planner=self.query_planner,
+            reranker=self.reranker,
+        )
+        return agent, len(chunks)
+
     def _rebuild_index(self) -> int:
         with self._lock:
-            if not self.documents:
-                self._agent = None
-                return 0
-            chunks = chunk_documents(
-                list(self.documents.values()),
-                chunk_size=self.chunk_size,
-                overlap=self.overlap,
-            )
-            next_agent = AgenticRetriever(
-                HybridRetriever(chunks, embedding_provider=self.embedding_provider),
-                planner=self.query_planner,
-                reranker=self.reranker,
-            )
-            self._agent = next_agent
-            return len(chunks)
+            self._agent, count = self._build_index(self.documents)
+            return count
 
     def index(self, documents: list[Document]) -> int:
         if not documents:
@@ -72,19 +74,26 @@ class RAGEngine:
             for document in documents:
                 if not document.id.strip() or not document.text.strip():
                     raise ValueError("Documents require non-empty IDs and text.")
-                self.documents[document.id] = document
+            next_documents = self.documents | {document.id: document for document in documents}
+            next_agent, count = self._build_index(next_documents)
             if self.document_store is not None:
                 self.document_store.upsert_many(documents)
-            return self._rebuild_index()
+            # Publish only after validation, index construction and durable writes succeed.
+            self.documents = next_documents
+            self._agent = next_agent
+            return count
 
     def delete(self, document_id: str) -> bool:
         with self._lock:
             if document_id not in self.documents:
                 return False
-            del self.documents[document_id]
+            next_documents = self.documents.copy()
+            del next_documents[document_id]
+            next_agent, _ = self._build_index(next_documents)
             if self.document_store is not None:
                 self.document_store.delete(document_id)
-            self._rebuild_index()
+            self.documents = next_documents
+            self._agent = next_agent
             return True
 
     def retrieve(
