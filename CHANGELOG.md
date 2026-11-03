@@ -6,6 +6,17 @@ The format follows the intent of [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+### Fixed
+- Equal-score chunks are now ordered by chunk ID in BM25, vector, RRF and reranker rankings. Previously ties kept insertion order, so a restarted engine (SQLite reloads documents by ID) could rank the same corpus differently.
+- The lexical tokenizer now trims leading/trailing `.`, `-` and `_` from tokens (internal ones such as `v1.2`, `gpt-4o`, `err_tls_042` are kept). Previously `tokenize("ranks evidence.")` produced `evidence.`, so BM25 and reranker overlap missed sentence-final terms. Side effects: `.env` -> `env`, `now-` -> `now`, `__init__` -> `init`.
+- `top_k` larger than the 20-candidate pool is now honoured; it was silently capped at 20 results.
+
+### Added
+- `makma.v1` contract: `rag_engine.contracts.capabilities()` / `run_operation()` with `ingest`, `retrieve`, `answer`, `delete_document`, vendored JSON Schema in `contracts/`, and authenticated `GET /v1/capabilities` and `POST /v1/ops/{operation}` routes.
+- Chunk character offsets (`start_char`/`end_char`) into the source document, SHA-256 provenance for cited spans, and an index fingerprint reported on every retrieval trace.
+- Answer citation verification: `answer_citations` and `unsupported_citations` (citation-shaped IDs not present in the supplied context).
+- `ndcg_at_k` and an offline benchmark runner (`python -m rag_engine.benchmark`) over a judged synthetic dataset pinned by SHA-256.
+
 ### Engineering
 - Added repository ownership and structured contribution workflows.
 - Added Dependabot coverage for Python and GitHub Actions dependencies.

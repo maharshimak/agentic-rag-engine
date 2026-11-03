@@ -59,7 +59,10 @@ G --> A[Answer + Citations]
 - token-budgeted citation context construction
 - offline grounded extractive generation
 - OpenAI-compatible `/v1/chat/completions` generator for real LLMs
-- Recall@K, Precision@K, MRR and Hit Rate evaluation
+- Recall@K, Precision@K, MRR, Hit Rate and graded nDCG@K evaluation
+- deterministic tie-breaking (score, then chunk ID) so rankings do not depend on insertion or reload order
+- chunk character offsets, SHA-256 span provenance, index fingerprints and answer-citation verification
+- `makma.v1` contract operations (`ingest`, `retrieve`, `answer`, `delete_document`)
 - FastAPI indexing, retrieval and answer endpoints
 - latency and retrieval tracing
 - Docker support
@@ -82,6 +85,51 @@ Open `http://localhost:8000/docs`.
 - `POST /v1/documents/index`
 - `POST /v1/retrieve`
 - `POST /v1/answer`
+- `GET /v1/capabilities` (`makma.v1`)
+- `POST /v1/ops/{operation}` (`makma.v1` envelope)
+
+All routes except `/health` use the same local-only / bearer-token check.
+
+## Evidence provenance and determinism
+
+- Each chunk records `start_char`/`end_char` (Python string indices, end-exclusive) into its source `Document.text`. `chunk.text` is the whitespace-normalized form of that span; `rag_engine.provenance.source_span()` returns the exact source slice, or `None` if the document changed.
+- `RAGEngine.index_fingerprint()` is a SHA-256 over canonical JSON of every indexed chunk (ID, document ID, text hash, offsets, metadata) plus the embedding provider identity (`sha256_token_hash` + dimensions, or the configured model name). It is independent of insertion order and is reported as `trace.index_fingerprint` on every retrieval.
+- Rankings sort by score, then chunk ID, at every stage, so the same corpus and query return the same order after a restart or a different ingestion order.
+- `answer()` returns `citations` (chunks placed in the context, always a subset of the retrieved set), `answer_citations` (citation-shaped `[doc::cN]` IDs in the answer that were in the context) and `unsupported_citations` (citation-shaped IDs in the answer that were not). This checks that cited IDs exist; it does not check that the cited text supports the claim.
+- Deleting a document rebuilds the index; tests assert deleted documents never appear in retrieval results, contexts or citations across repeated queries.
+
+## `makma.v1` contract
+
+`rag_engine.contracts.run_operation(operation, payload, *, run_id=None, correlation_id=None, engine=None)` returns the shared envelope validated by `contracts/makma.v1.schema.json`; `capabilities()` lists the operations and their input JSON Schemas.
+
+| Operation | Input | `data` | Side effects |
+| --- | --- | --- | --- |
+| `ingest` | `documents: [{id, text, metadata?}]` (1–100) | `documents`, `document_ids`, `indexed_chunks`, `index_fingerprint` | yes |
+| `retrieve` | `query`, `top_k` (1–50, default 5) | `results` (chunk ID, document ID, text, text SHA-256, offsets, per-stage scores), `trace` | no |
+| `answer` | `query`, `top_k` | `answer`, `abstained`, `confidence`, `citations`, `answer_citations`, `unsupported_citations`, `citations_in_retrieved_set`, `context`, `retrieved_chunk_ids`, `trace` | no |
+| `delete_document` | `document_id` | `document_id`, `deleted`, `documents_remaining`, `index_fingerprint` | yes |
+
+Provenance entries are `document` (ingest; SHA-256 of the full text) or `chunk` (retrieve/answer; SHA-256 of the exact source span, with `span = [start_char, end_char]`). `execution_mode` is `deterministic_offline` with the default hash embeddings, extractive generator and heuristic planner/reranker; it becomes `local_model` or `remote_model` when a configured OpenAI-compatible endpoint (loopback host vs. other host) or a cross-encoder participates. Error codes: `UNKNOWN_OPERATION`, `INVALID_INPUT`, `INDEX_EMPTY`, `PROVIDER_UNAVAILABLE` (retryable), `INTERNAL_ERROR`. Over HTTP these map to 404, 422, 409, 503 and 500, with the envelope as the body; `X-Correlation-ID` sets `correlation_id`.
+
+## Offline retrieval benchmark
+
+`benchmarks/retrieval_v1.json` is a hand-written synthetic corpus (12 documents, one deleted after ingestion) with 14 queries and graded judgments (0/1/2). It includes near-duplicate documents, a prompt-injection document, an identifier near-miss (`ERR_TLS_041` vs `ERR_TLS_042`), vocabulary-mismatch paraphrases, a query whose only matching document is deleted, and an unanswerable query. Judgments were written by the author of the dataset, before running the engine, and have not been independently reviewed.
+
+```bash
+python -m rag_engine.benchmark benchmarks/retrieval_v1.json --k 5 --output report.json
+```
+
+The report is document-level and records `dataset_sha256` (SHA-256 of the dataset's canonical JSON, pinned in `tests/test_benchmark_dataset.py`), the index fingerprint and engine configuration. It also checks invariants: rankings and fingerprint identical when the corpus is ingested in reverse order, no deleted-document leaks, all context citations within the retrieved set. The command exits non-zero if an invariant fails.
+
+Measured with the default offline engine (SHA-256 token-hash vectors, BM25, heuristic reranker), `k=5`, Python 3.12.10 on Windows 11, dataset SHA-256 `5688b37a…c4ee4f`:
+
+| Answerable queries (12) | Recall@5 | Precision@5 | MRR | nDCG@5 | Citation coverage |
+| --- | --- | --- | --- | --- | --- |
+| mean | 0.833 | 0.217 | 0.833 | 0.833 | 0.833 |
+
+Re-measured after the tokenizer edge-punctuation fix (sentence-final `evidence.` now matches `evidence`): every metric above, the rankings and the index fingerprint are unchanged on this dataset; only `q04`'s confidence moved (0.5677 → 0.5817) because `expired.` now matches the query term. The fix is covered by `tests/test_tokenize.py`, not by this benchmark.
+
+The two misses are `q07` ("paid time off" vs. "vacation" — no shared vocabulary) and `q12` ("receipt upload" vs. "Receipts … uploaded" — the tokenizer does not stem). Precision@5 is bounded at 0.2 for single-relevant-document queries. For the two unanswerable queries the abstention rate was 0.0: retrieval confidence ranged 0.55–0.69 for every query, so the current confidence score does not separate answerable from unanswerable queries on this dataset. These numbers describe this small synthetic dataset only. The benchmark complements the hit-rate/MRR regression gate proposed in draft PR #10.
 
 ## Use a real OpenAI-compatible model server
 
@@ -116,7 +164,7 @@ Built as an engineering portfolio project focused on production GenAI systems.
 
 ## Scope and limitations
 
-Offline embeddings use token hashing, not a trained semantic model. The reranker and query planner are deterministic heuristics. Retrieval indexes still live in memory and are rebuilt when documents change; source documents can optionally persist in SQLite and are reloaded on engine startup. When a real or local embedding provider is wrapped by `SQLiteCachedEmbeddingProvider`, unchanged text embeddings persist across rebuilds and process restarts. Input is already-extracted text; PDF/OCR/HTML ingestion is not implemented. Citations identify supplied context but do not establish answer faithfulness. The small synthetic retrieval test is a regression fixture, not a general retrieval benchmark. Remote adapters require an independently hosted compatible service and are not validated against live providers by offline CI.
+Offline embeddings use token hashing, not a trained semantic model. The reranker and query planner are deterministic heuristics. Retrieval indexes still live in memory and are rebuilt when documents change; source documents can optionally persist in SQLite and are reloaded on engine startup. When a real or local embedding provider is wrapped by `SQLiteCachedEmbeddingProvider`, unchanged text embeddings persist across rebuilds and process restarts. Input is already-extracted text; PDF/OCR/HTML ingestion is not implemented. Citations identify supplied context but do not establish answer faithfulness. The synthetic retrieval tests and `benchmarks/retrieval_v1.json` are regression fixtures, not a general retrieval benchmark. Remote adapters require an independently hosted compatible service and are not validated against live providers by offline CI.
 
 ## Installation and development
 

@@ -19,9 +19,10 @@ def chunk_document(
     if overlap < 0 or overlap >= chunk_size:
         raise ValueError("overlap must be >= 0 and smaller than chunk_size")
 
-    tokens = tokenize(document.text)
-    if not tokens:
+    matches = list(_TOKEN_RE.finditer(document.text))
+    if not matches:
         return []
+    tokens = [match.group(0) for match in matches]
 
     chunks: list[Chunk] = []
     step = chunk_size - overlap
@@ -36,6 +37,8 @@ def chunk_document(
                 start_token=start,
                 end_token=end,
                 metadata=dict(document.metadata),
+                start_char=matches[start].start(),
+                end_char=matches[end - 1].end(),
             )
         )
         if end >= len(tokens):

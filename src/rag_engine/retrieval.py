@@ -8,13 +8,32 @@ from math import isfinite, log, sqrt
 from rag_engine.embeddings import EmbeddingProvider, HashEmbeddingProvider
 from rag_engine.models import Chunk, ScoredChunk
 
+_EDGE_PUNCTUATION = "._-"
+
 
 def tokenize(text: str) -> list[str]:
-    return [
-        token.casefold()
+    """Lexical tokens: runs of word characters, ``.`` and ``-``, casefolded.
+
+    Leading/trailing ``.``, ``-`` and ``_`` are trimmed so sentence-final words
+    ("evidence.") match their bare form; internal ones are kept (``v1.2``,
+    ``gpt-4o``, ``err_tls_042``). Consequences: ``.env`` -> ``env``, ``now-`` -> ``now``,
+    ``__init__`` -> ``init``. Used only for BM25, reranker overlap and query
+    heuristics; chunk boundaries and character offsets come from ``chunking``.
+    """
+    tokens = (
+        token.strip(_EDGE_PUNCTUATION)
         for token in re.findall(r"[\w.-]+", text, flags=re.UNICODE)
-        if token.strip("._-")
-    ]
+    )
+    return [token.casefold() for token in tokens if token]
+
+
+def ranking_key(item: ScoredChunk) -> tuple[float, str]:
+    """Sort key: descending score, then ascending chunk ID as a deterministic tie-break.
+
+    Without the explicit tie-break, equal scores kept index insertion order, so the
+    same corpus could rank differently after a restart (SQLite reloads by ID).
+    """
+    return (-item.score, item.chunk.id)
 
 
 def cosine_similarity(a: list[float], b: list[float]) -> float:
@@ -64,7 +83,7 @@ class BM25Index:
                         lexical_score=score,
                     )
                 )
-        return sorted(scored, key=lambda item: item.score, reverse=True)[:top_k]
+        return sorted(scored, key=ranking_key)[:top_k]
 
 
 class VectorIndex:
@@ -93,7 +112,7 @@ class VectorIndex:
                     semantic_score=score,
                 )
             )
-        return sorted(scored, key=lambda item: item.score, reverse=True)[:top_k]
+        return sorted(scored, key=ranking_key)[:top_k]
 
 
 def reciprocal_rank_fusion(
@@ -134,8 +153,7 @@ def reciprocal_rank_fusion(
             )
             for chunk_id, score in fused.items()
         ],
-        key=lambda item: item.score,
-        reverse=True,
+        key=ranking_key,
     )
 
 

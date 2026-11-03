@@ -1,10 +1,13 @@
 import os
 import secrets
-from typing import Any
+from typing import Annotated, Any
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
+from fastapi import Body, Depends, FastAPI, Header, HTTPException, Request, status
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from rag_engine.contracts import capabilities as contract_capabilities
+from rag_engine.contracts import run_operation
 from rag_engine.models import Document
 from rag_engine.settings import build_engine
 
@@ -118,6 +121,8 @@ def retrieve(request: QueryRequest) -> dict[str, object]:
                 "semantic_score": item.semantic_score,
                 "rerank_score": item.rerank_score,
                 "metadata": item.chunk.metadata,
+                "start_char": item.chunk.start_char,
+                "end_char": item.chunk.end_char,
             }
             for item in results
         ],
@@ -127,6 +132,7 @@ def retrieve(request: QueryRequest) -> dict[str, object]:
             "candidate_count": trace.candidate_count,
             "returned_count": trace.returned_count,
             "latency_ms": trace.latency_ms,
+            "index_fingerprint": trace.index_fingerprint,
         },
     }
 
@@ -142,6 +148,8 @@ def answer(request: QueryRequest) -> dict[str, object]:
     return {
         "answer": result["answer"],
         "citations": result["citations"],
+        "answer_citations": result["answer_citations"],
+        "unsupported_citations": result["unsupported_citations"],
         "context": result["context"],
         "confidence": result["confidence"],
         "abstained": result["abstained"],
@@ -151,5 +159,38 @@ def answer(request: QueryRequest) -> dict[str, object]:
             "candidate_count": trace.candidate_count,
             "returned_count": trace.returned_count,
             "latency_ms": trace.latency_ms,
+            "index_fingerprint": trace.index_fingerprint,
         },
     }
+
+
+_ERROR_STATUS = {
+    "UNKNOWN_OPERATION": status.HTTP_404_NOT_FOUND,
+    "INVALID_INPUT": status.HTTP_422_UNPROCESSABLE_CONTENT,
+    "INDEX_EMPTY": status.HTTP_409_CONFLICT,
+    "PROVIDER_UNAVAILABLE": status.HTTP_503_SERVICE_UNAVAILABLE,
+}
+
+
+@app.get("/v1/capabilities", dependencies=protected)
+def capabilities() -> dict[str, Any]:
+    return contract_capabilities()
+
+
+@app.post("/v1/ops/{operation}", dependencies=protected)
+def run_contract_operation(
+    operation: str,
+    payload: Annotated[Any, Body()] = None,
+    x_correlation_id: Annotated[str | None, Header(max_length=128)] = None,
+) -> JSONResponse:
+    envelope = run_operation(
+        operation,
+        {} if payload is None else payload,
+        correlation_id=x_correlation_id or None,
+        engine=engine,
+    )
+    error = envelope["error"]
+    code = status.HTTP_200_OK
+    if error is not None:
+        code = _ERROR_STATUS.get(error["code"], status.HTTP_500_INTERNAL_SERVER_ERROR)
+    return JSONResponse(status_code=code, content=envelope)
