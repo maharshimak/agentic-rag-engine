@@ -8,13 +8,23 @@ from math import isfinite, log, sqrt
 from rag_engine.embeddings import EmbeddingProvider, HashEmbeddingProvider
 from rag_engine.models import Chunk, ScoredChunk
 
+_EDGE_PUNCTUATION = "._-"
+
 
 def tokenize(text: str) -> list[str]:
-    return [
-        token.casefold()
+    """Lexical tokens: runs of word characters, ``.`` and ``-``, casefolded.
+
+    Leading/trailing ``.``, ``-`` and ``_`` are trimmed so sentence-final words
+    ("evidence.") match their bare form; internal ones are kept (``v1.2``,
+    ``gpt-4o``, ``err_tls_042``). Consequences: ``.env`` -> ``env``, ``now-`` -> ``now``,
+    ``__init__`` -> ``init``. Used only for BM25, reranker overlap and query
+    heuristics; chunk boundaries and character offsets come from ``chunking``.
+    """
+    tokens = (
+        token.strip(_EDGE_PUNCTUATION)
         for token in re.findall(r"[\w.-]+", text, flags=re.UNICODE)
-        if token.strip("._-")
-    ]
+    )
+    return [token.casefold() for token in tokens if token]
 
 
 def ranking_key(item: ScoredChunk) -> tuple[float, str]:

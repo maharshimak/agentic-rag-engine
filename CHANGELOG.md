@@ -8,6 +8,7 @@ The format follows the intent of [Keep a Changelog](https://keepachangelog.com/)
 
 ### Fixed
 - Equal-score chunks are now ordered by chunk ID in BM25, vector, RRF and reranker rankings. Previously ties kept insertion order, so a restarted engine (SQLite reloads documents by ID) could rank the same corpus differently.
+- The lexical tokenizer now trims leading/trailing `.`, `-` and `_` from tokens (internal ones such as `v1.2`, `gpt-4o`, `err_tls_042` are kept). Previously `tokenize("ranks evidence.")` produced `evidence.`, so BM25 and reranker overlap missed sentence-final terms. Side effects: `.env` -> `env`, `now-` -> `now`, `__init__` -> `init`.
 - `top_k` larger than the 20-candidate pool is now honoured; it was silently capped at 20 results.
 
 ### Added

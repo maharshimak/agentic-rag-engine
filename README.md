@@ -127,6 +127,8 @@ Measured with the default offline engine (SHA-256 token-hash vectors, BM25, heur
 | --- | --- | --- | --- | --- | --- |
 | mean | 0.833 | 0.217 | 0.833 | 0.833 | 0.833 |
 
+Re-measured after the tokenizer edge-punctuation fix (sentence-final `evidence.` now matches `evidence`): every metric above, the rankings and the index fingerprint are unchanged on this dataset; only `q04`'s confidence moved (0.5677 → 0.5817) because `expired.` now matches the query term. The fix is covered by `tests/test_tokenize.py`, not by this benchmark.
+
 The two misses are `q07` ("paid time off" vs. "vacation" — no shared vocabulary) and `q12` ("receipt upload" vs. "Receipts … uploaded" — the tokenizer does not stem). Precision@5 is bounded at 0.2 for single-relevant-document queries. For the two unanswerable queries the abstention rate was 0.0: retrieval confidence ranged 0.55–0.69 for every query, so the current confidence score does not separate answerable from unanswerable queries on this dataset. These numbers describe this small synthetic dataset only. The benchmark complements the hit-rate/MRR regression gate proposed in draft PR #10.
 
 ## Use a real OpenAI-compatible model server
