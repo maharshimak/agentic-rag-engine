@@ -17,6 +17,10 @@ class Chunk:
     start_token: int
     end_token: int
     metadata: dict[str, Any] = field(default_factory=dict)
+    # Character offsets into the source ``Document.text`` (Python str indices,
+    # end-exclusive). ``None`` when a chunk was not produced by ``chunk_document``.
+    start_char: int | None = None
+    end_char: int | None = None
 
 
 @dataclass(frozen=True)
@@ -35,3 +39,4 @@ class RetrievalTrace:
     candidate_count: int
     returned_count: int
     latency_ms: float
+    index_fingerprint: str | None = None

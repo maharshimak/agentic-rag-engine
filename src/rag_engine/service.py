@@ -6,9 +6,10 @@ from rag_engine.agent import AgenticRetriever, QueryPlanner
 from rag_engine.chunking import chunk_documents
 from rag_engine.confidence import assess_retrieval_confidence
 from rag_engine.context import ContextBuilder
-from rag_engine.embeddings import EmbeddingProvider
+from rag_engine.embeddings import EmbeddingProvider, HashEmbeddingProvider
 from rag_engine.generation import ExtractiveGenerator, Generator
 from rag_engine.models import Document, RetrievalTrace, ScoredChunk
+from rag_engine.provenance import describe_embedding_provider, index_fingerprint, verify_citations
 from rag_engine.rerank import TransparentReranker
 from rag_engine.retrieval import HybridRetriever
 from rag_engine.storage import DocumentStore
@@ -42,6 +43,7 @@ class RAGEngine:
         stored = document_store.list_documents() if document_store is not None else []
         self.documents: dict[str, Document] = {document.id: document for document in stored}
         self._agent: AgenticRetriever | None = None
+        self._fingerprint: tuple[AgenticRetriever, str] | None = None
         if self.documents:
             self._rebuild_index()
 
@@ -87,6 +89,29 @@ class RAGEngine:
             self._rebuild_index()
             return True
 
+    def _fingerprint_for(self, agent: AgenticRetriever) -> str:
+        cached = self._fingerprint
+        if cached is not None and cached[0] is agent:
+            return cached[1]
+        retriever = agent.retriever
+        fingerprint = index_fingerprint(
+            retriever.lexical.chunks,
+            describe_embedding_provider(retriever.semantic.provider),
+        )
+        self._fingerprint = (agent, fingerprint)
+        return fingerprint
+
+    def index_fingerprint(self) -> str | None:
+        """SHA-256 of the currently published index (``None`` when nothing is indexed)."""
+        with self._lock:
+            agent = self._agent
+            return None if agent is None else self._fingerprint_for(agent)
+
+    @property
+    def uses_hash_embeddings(self) -> bool:
+        provider = self.embedding_provider or HashEmbeddingProvider()
+        return describe_embedding_provider(provider)["kind"] == "sha256_token_hash"
+
     def retrieve(
         self,
         query: str,
@@ -94,6 +119,7 @@ class RAGEngine:
     ) -> tuple[list[ScoredChunk], RetrievalTrace]:
         with self._lock:
             agent = self._agent
+            fingerprint = None if agent is None else self._fingerprint_for(agent)
         if agent is None:
             raise RuntimeError("No documents have been indexed")
 
@@ -109,6 +135,7 @@ class RAGEngine:
             candidate_count=candidate_count,
             returned_count=len(results),
             latency_ms=latency_ms,
+            index_fingerprint=fingerprint,
         )
         return results, trace
 
@@ -125,10 +152,16 @@ class RAGEngine:
             )
         else:
             answer = self.generator.generate(query, context)
+        citation_check = verify_citations(answer, context.citations)
 
         return {
             "answer": answer,
             "citations": context.citations,
+            # Citation-shaped IDs that appear in the answer text and were in the context,
+            # and any that were not (an ungrounded or hallucinated citation).
+            "answer_citations": citation_check.cited_ids,
+            "unsupported_citations": citation_check.unknown_ids,
+            "results": results,
             "context": context.text,
             "trace": trace,
             "confidence": asdict(confidence),
