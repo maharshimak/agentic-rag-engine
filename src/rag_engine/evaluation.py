@@ -1,4 +1,6 @@
+from collections.abc import Mapping
 from dataclasses import dataclass
+from math import isfinite, log2
 
 
 def recall_at_k(relevant: set[str], retrieved: list[str], k: int) -> float:
@@ -23,6 +25,30 @@ def reciprocal_rank(relevant: set[str], retrieved: list[str]) -> float:
 
 def hit_rate_at_k(relevant: set[str], retrieved: list[str], k: int) -> float:
     return float(bool(relevant.intersection(retrieved[:k])))
+
+
+def ndcg_at_k(relevance: Mapping[str, float], retrieved: list[str], k: int) -> float:
+    """Normalized discounted cumulative gain with linear gain ``rel / log2(rank + 1)``.
+
+    ``relevance`` maps IDs to graded judgments (>= 0; unlisted IDs count as 0).
+    Repeated IDs earn gain only at their first rank. Returns 0.0 when no judged
+    item has positive relevance, because there is no ideal ranking to normalize by.
+    """
+    if isinstance(k, bool) or not isinstance(k, int) or k <= 0:
+        raise ValueError("k must be a positive integer")
+    for grade in relevance.values():
+        if isinstance(grade, bool) or not isfinite(grade) or grade < 0:
+            raise ValueError("relevance grades must be finite and non-negative")
+    seen: set[str] = set()
+    dcg = 0.0
+    for rank, item in enumerate(retrieved[:k], start=1):
+        if item in seen:
+            continue
+        seen.add(item)
+        dcg += float(relevance.get(item, 0.0)) / log2(rank + 1)
+    ideal = sorted((float(g) for g in relevance.values() if g > 0), reverse=True)[:k]
+    idcg = sum(grade / log2(rank + 1) for rank, grade in enumerate(ideal, start=1))
+    return dcg / idcg if idcg else 0.0
 
 
 @dataclass(frozen=True)
