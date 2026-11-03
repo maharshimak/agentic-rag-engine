@@ -5,6 +5,7 @@ from math import isfinite
 from typing import Any
 
 from rag_engine.models import ScoredChunk
+from rag_engine.retrieval import ranking_key
 
 
 class CrossEncoderReranker:
@@ -68,4 +69,4 @@ class CrossEncoderReranker:
             replace(item, score=score, rerank_score=score)
             for item, score in zip(candidates, scores, strict=True)
         ]
-        return sorted(reranked, key=lambda item: item.score, reverse=True)[:top_k]
+        return sorted(reranked, key=ranking_key)[:top_k]

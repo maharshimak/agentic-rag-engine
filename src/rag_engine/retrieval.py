@@ -17,6 +17,15 @@ def tokenize(text: str) -> list[str]:
     ]
 
 
+def ranking_key(item: ScoredChunk) -> tuple[float, str]:
+    """Sort key: descending score, then ascending chunk ID as a deterministic tie-break.
+
+    Without the explicit tie-break, equal scores kept index insertion order, so the
+    same corpus could rank differently after a restart (SQLite reloads by ID).
+    """
+    return (-item.score, item.chunk.id)
+
+
 def cosine_similarity(a: list[float], b: list[float]) -> float:
     if len(a) != len(b) or not a:
         raise ValueError("Embedding dimensions must match and be non-empty.")
@@ -64,7 +73,7 @@ class BM25Index:
                         lexical_score=score,
                     )
                 )
-        return sorted(scored, key=lambda item: item.score, reverse=True)[:top_k]
+        return sorted(scored, key=ranking_key)[:top_k]
 
 
 class VectorIndex:
@@ -93,7 +102,7 @@ class VectorIndex:
                     semantic_score=score,
                 )
             )
-        return sorted(scored, key=lambda item: item.score, reverse=True)[:top_k]
+        return sorted(scored, key=ranking_key)[:top_k]
 
 
 def reciprocal_rank_fusion(
@@ -134,8 +143,7 @@ def reciprocal_rank_fusion(
             )
             for chunk_id, score in fused.items()
         ],
-        key=lambda item: item.score,
-        reverse=True,
+        key=ranking_key,
     )
 
 

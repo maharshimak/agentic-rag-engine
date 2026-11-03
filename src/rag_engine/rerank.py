@@ -1,7 +1,7 @@
 from dataclasses import replace
 
 from rag_engine.models import ScoredChunk
-from rag_engine.retrieval import tokenize
+from rag_engine.retrieval import ranking_key, tokenize
 
 
 class TransparentReranker:
@@ -29,4 +29,4 @@ class TransparentReranker:
                 )
             )
 
-        return sorted(reranked, key=lambda item: item.score, reverse=True)[:top_k]
+        return sorted(reranked, key=ranking_key)[:top_k]

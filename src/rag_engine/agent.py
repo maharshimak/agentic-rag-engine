@@ -44,6 +44,8 @@ class AgenticRetriever:
         candidate_k: int = 20,
     ) -> tuple[list[ScoredChunk], list[str], int]:
         planned_queries = self.planner.plan(query)
+        # A candidate pool smaller than top_k silently capped results (top_k=30 returned 20).
+        candidate_k = max(candidate_k, top_k)
         rankings = [
             self.retriever.retrieve(
                 planned_query,
