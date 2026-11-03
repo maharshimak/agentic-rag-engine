@@ -1,8 +1,10 @@
 from rag_engine.advanced import MMRDiversityReranker
+from rag_engine.contracts import capabilities, run_operation
 from rag_engine.embeddings import SQLiteCachedEmbeddingProvider
 from rag_engine.evaluation import (
     evaluate_retrieval,
     hit_rate_at_k,
+    ndcg_at_k,
     precision_at_k,
     recall_at_k,
     reciprocal_rank,
@@ -25,9 +27,12 @@ __all__ = [
     "SQLiteCachedEmbeddingProvider",
     "SQLiteDocumentStore",
     "ScoredChunk",
+    "capabilities",
     "evaluate_retrieval",
     "hit_rate_at_k",
+    "ndcg_at_k",
     "precision_at_k",
     "recall_at_k",
     "reciprocal_rank",
+    "run_operation",
 ]
