@@ -2,7 +2,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from rag_engine.embeddings import HashEmbeddingProvider, OpenAICompatibleEmbeddingProvider
 from rag_engine.generation import ExtractiveGenerator, OpenAICompatibleChatGenerator
-from rag_engine.service import RAGEngine
+from rag_engine.service import DEFAULT_MAX_INDEX_CHUNKS, RAGEngine
 
 
 class Settings(BaseSettings):
@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     chunk_size: int = 180
     chunk_overlap: int = 30
     context_tokens: int = 700
+    max_index_chunks: int = DEFAULT_MAX_INDEX_CHUNKS
 
 
 def build_engine(settings: Settings | None = None) -> RAGEngine:
@@ -45,4 +46,5 @@ def build_engine(settings: Settings | None = None) -> RAGEngine:
         chunk_size=config.chunk_size,
         overlap=config.chunk_overlap,
         context_tokens=config.context_tokens,
+        max_index_chunks=config.max_index_chunks,
     )

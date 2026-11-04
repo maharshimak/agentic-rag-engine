@@ -1,18 +1,20 @@
 from dataclasses import asdict
-from threading import RLock
+from threading import Lock, RLock
 from time import perf_counter
 
 from rag_engine.agent import AgenticRetriever, QueryPlanner
-from rag_engine.chunking import chunk_documents
+from rag_engine.chunking import chunk_document
 from rag_engine.confidence import assess_retrieval_confidence
 from rag_engine.context import ContextBuilder
 from rag_engine.embeddings import EmbeddingProvider, HashEmbeddingProvider
 from rag_engine.generation import ExtractiveGenerator, Generator
-from rag_engine.models import Document, RetrievalTrace, ScoredChunk
+from rag_engine.models import Chunk, Document, RetrievalTrace, ScoredChunk
 from rag_engine.provenance import describe_embedding_provider, index_fingerprint, verify_citations
 from rag_engine.rerank import TransparentReranker
 from rag_engine.retrieval import HybridRetriever
 from rag_engine.storage import DocumentStore
+
+DEFAULT_MAX_INDEX_CHUNKS = 20_000
 
 
 class RAGEngine:
@@ -27,9 +29,13 @@ class RAGEngine:
         context_tokens: int = 700,
         document_store: DocumentStore | None = None,
         abstain_threshold: float = 0.45,
+        max_index_chunks: int = DEFAULT_MAX_INDEX_CHUNKS,
     ) -> None:
         if not 0 <= abstain_threshold <= 1:
             raise ValueError("abstain_threshold must be between 0 and 1")
+        if type(max_index_chunks) is not int or max_index_chunks <= 0:
+            raise ValueError("max_index_chunks must be a positive integer.")
+        self.max_index_chunks = max_index_chunks
         self.embedding_provider = embedding_provider
         self.generator = generator or ExtractiveGenerator()
         self.query_planner = query_planner
@@ -40,53 +46,60 @@ class RAGEngine:
         self.document_store = document_store
         self.abstain_threshold = abstain_threshold
         self._lock = RLock()
+        self._writer_lock = Lock()
         stored = document_store.list_documents() if document_store is not None else []
         self.documents: dict[str, Document] = {document.id: document for document in stored}
-        self._agent: AgenticRetriever | None = None
+        self._agent, _ = self._build_index(self.documents)
         self._fingerprint: tuple[AgenticRetriever, str] | None = None
-        if self.documents:
-            self._rebuild_index()
 
-    def _rebuild_index(self) -> int:
-        with self._lock:
-            if not self.documents:
-                self._agent = None
-                return 0
-            chunks = chunk_documents(
-                list(self.documents.values()),
-                chunk_size=self.chunk_size,
-                overlap=self.overlap,
-            )
-            next_agent = AgenticRetriever(
+    def _build_index(
+        self, documents: dict[str, Document]
+    ) -> tuple[AgenticRetriever | None, int]:
+        if not documents:
+            return None, 0
+        chunks: list[Chunk] = []
+        for document in documents.values():
+            chunks.extend(chunk_document(document, chunk_size=self.chunk_size, overlap=self.overlap))
+            if len(chunks) > self.max_index_chunks:
+                raise ValueError(f"Index exceeds the {self.max_index_chunks} chunk limit.")
+        return (
+            AgenticRetriever(
                 HybridRetriever(chunks, embedding_provider=self.embedding_provider),
                 planner=self.query_planner,
                 reranker=self.reranker,
-            )
-            self._agent = next_agent
-            return len(chunks)
+            ),
+            len(chunks),
+        )
+
+    def _publish(self, documents: dict[str, Document], agent: AgenticRetriever | None) -> None:
+        with self._lock:
+            self.documents = documents
+            self._agent = agent
+            self._fingerprint = None
 
     def index(self, documents: list[Document]) -> int:
-        if not documents:
-            return self._rebuild_index()
         if len({document.id for document in documents}) != len(documents):
             raise ValueError("Document IDs must be unique within an index batch.")
-        with self._lock:
-            for document in documents:
-                if not document.id.strip() or not document.text.strip():
-                    raise ValueError("Documents require non-empty IDs and text.")
-                self.documents[document.id] = document
-            if self.document_store is not None:
+        if any(not document.id.strip() or not document.text.strip() for document in documents):
+            raise ValueError("Documents require non-empty IDs and text.")
+        with self._writer_lock:
+            next_documents = {**self.documents, **{doc.id: doc for doc in documents}}
+            agent, chunk_count = self._build_index(next_documents)
+            if documents and self.document_store is not None:
                 self.document_store.upsert_many(documents)
-            return self._rebuild_index()
+            self._publish(next_documents, agent)
+            return chunk_count
 
     def delete(self, document_id: str) -> bool:
-        with self._lock:
+        with self._writer_lock:
             if document_id not in self.documents:
                 return False
-            del self.documents[document_id]
+            next_documents = self.documents.copy()
+            del next_documents[document_id]
+            agent, _ = self._build_index(next_documents)
             if self.document_store is not None:
                 self.document_store.delete(document_id)
-            self._rebuild_index()
+            self._publish(next_documents, agent)
             return True
 
     def _fingerprint_for(self, agent: AgenticRetriever) -> str:
