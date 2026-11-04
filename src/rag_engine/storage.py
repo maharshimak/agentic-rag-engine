@@ -10,6 +10,8 @@ from rag_engine.models import Document
 
 
 class DocumentStore(Protocol):
+    """Source persistence; mutations must commit completely or leave the store unchanged."""
+
     def list_documents(self) -> list[Document]: ...
 
     def upsert_many(self, documents: list[Document]) -> None: ...

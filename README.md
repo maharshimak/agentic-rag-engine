@@ -50,6 +50,7 @@ G --> A[Answer + Citations]
 - real BM25-style lexical index
 - deterministic offline embedding provider for reproducible CI
 - optional SQLite source-document persistence with reload-on-start and persistent deletion
+- staged index updates/deletions that preserve the previous document and retrieval snapshot on validation, embedding or atomic storage failures
 - optional persistent content-addressed SQLite embedding cache to avoid re-embedding unchanged chunks
 - OpenAI-compatible `/v1/embeddings` adapter for real local/cloud embedding servers
 - cosine semantic retrieval
