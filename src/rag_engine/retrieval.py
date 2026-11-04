@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import re
-from collections import Counter
+from collections import Counter, defaultdict
+from collections.abc import Iterable
 from dataclasses import replace
+from heapq import nsmallest
 from math import isfinite, log, sqrt
 
 from rag_engine.embeddings import EmbeddingProvider, HashEmbeddingProvider
@@ -36,13 +38,31 @@ def ranking_key(item: ScoredChunk) -> tuple[float, str]:
     return (-item.score, item.chunk.id)
 
 
+def _vector_norm(vector: list[float]) -> float:
+    if not vector or not all(isfinite(value) for value in vector):
+        raise ValueError("Embeddings must be non-empty and contain finite values.")
+    norm = sqrt(sum(value * value for value in vector))
+    if not isfinite(norm):
+        raise ValueError("Embedding norm exceeds the supported range.")
+    return norm
+
+
+def _cosine(a: list[float], b: list[float], norm: float) -> float:
+    if not isfinite(norm):
+        raise ValueError("Embedding norm product exceeds the supported range.")
+    return sum(x * y for x, y in zip(a, b, strict=True)) / norm if norm else 0.0
+
+
 def cosine_similarity(a: list[float], b: list[float]) -> float:
     if len(a) != len(b) or not a:
         raise ValueError("Embedding dimensions must match and be non-empty.")
-    if not all(isfinite(v) for v in [*a, *b]):
-        raise ValueError("Embeddings must contain finite values.")
-    norm = sqrt(sum(x * x for x in a)) * sqrt(sum(y * y for y in b))
-    return sum(x * y for x, y in zip(a, b)) / norm if norm else 0.0
+    return _cosine(a, b, _vector_norm(a) * _vector_norm(b))
+
+
+def _top_matches(items: Iterable[ScoredChunk], top_k: int) -> list[ScoredChunk]:
+    if top_k < 0:
+        return sorted(items, key=ranking_key)[:top_k]
+    return nsmallest(top_k, items, key=ranking_key)
 
 
 class BM25Index:
@@ -50,40 +70,37 @@ class BM25Index:
         self.chunks = chunks
         self.k1 = k1
         self.b = b
-        self.tokens = [tokenize(chunk.text) for chunk in chunks]
-        self.lengths = [len(tokens) for tokens in self.tokens]
-        self.avg_length = sum(self.lengths) / len(self.lengths) if self.lengths else 1.0
-
-        document_frequency: Counter[str] = Counter()
-        for tokens in self.tokens:
-            document_frequency.update(set(tokens))
-        self.document_frequency = document_frequency
+        postings: dict[str, list[tuple[int, float]]] = defaultdict(list)
+        self.lengths = []
+        for position, chunk in enumerate(chunks):
+            tokens = tokenize(chunk.text)
+            self.lengths.append(len(tokens))
+            for term, frequency in Counter(tokens).items():
+                postings[term].append((position, frequency))
+        total = len(chunks)
+        self.avg_length = sum(self.lengths) / total if total else 1.0
+        self.document_frequency = Counter({term: len(entries) for term, entries in postings.items()})
+        for term, entries in postings.items():
+            df = self.document_frequency[term]
+            idf = log(1.0 + (total - df + 0.5) / (df + 0.5))
+            for i, (position, frequency) in enumerate(entries):
+                denominator = frequency + k1 * (1 - b + b * self.lengths[position] / self.avg_length)
+                entries[i] = (position, idf * (frequency * (k1 + 1)) / denominator)
+        self._postings = dict(postings)
 
     def search(self, query: str, top_k: int = 20) -> list[ScoredChunk]:
-        query_terms = tokenize(query)
-        total = len(self.chunks)
-        scored: list[ScoredChunk] = []
-
-        for chunk, tokens, length in zip(self.chunks, self.tokens, self.lengths):
-            frequencies = Counter(tokens)
-            score = 0.0
-            for term in query_terms:
-                frequency = frequencies[term]
-                if not frequency:
-                    continue
-                df = self.document_frequency[term]
-                idf = log(1.0 + (total - df + 0.5) / (df + 0.5))
-                denominator = frequency + self.k1 * (1 - self.b + self.b * length / self.avg_length)
-                score += idf * (frequency * (self.k1 + 1)) / denominator
-            if score > 0:
-                scored.append(
-                    ScoredChunk(
-                        chunk=chunk,
-                        score=score,
-                        lexical_score=score,
-                    )
-                )
-        return sorted(scored, key=ranking_key)[:top_k]
+        scores: dict[int, float] = defaultdict(float)
+        # Preserve query term order, including repetitions, for exact score parity.
+        for term in tokenize(query):
+            for position, weight in self._postings.get(term, ()):
+                scores[position] += weight
+        return _top_matches(
+            (
+                ScoredChunk(chunk=self.chunks[position], score=score, lexical_score=score)
+                for position, score in scores.items() if score > 0
+            ),
+            top_k,
+        )
 
 
 class VectorIndex:
@@ -94,25 +111,29 @@ class VectorIndex:
     ) -> None:
         self.chunks = chunks
         self.provider = provider or HashEmbeddingProvider()
-        self.vectors = self.provider.embed([chunk.text for chunk in chunks])
+        self.vectors = [list(vector) for vector in self.provider.embed([chunk.text for chunk in chunks])]
         if len(self.vectors) != len(chunks):
             raise ValueError("Embedding provider returned the wrong number of vectors.")
+        self._dimensions = len(self.vectors[0]) if self.vectors else 0
+        if any(len(vector) != self._dimensions for vector in self.vectors):
+            raise ValueError("Embedding dimensions must match.")
+        self._norms = [_vector_norm(vector) for vector in self.vectors]
 
     def search(self, query: str, top_k: int = 20) -> list[ScoredChunk]:
         if not self.chunks:
             return []
-        query_vector = self.provider.embed([query])[0]
-        scored: list[ScoredChunk] = []
-        for chunk, vector in zip(self.chunks, self.vectors):
-            score = cosine_similarity(query_vector, vector)
-            scored.append(
-                ScoredChunk(
-                    chunk=chunk,
-                    score=score,
-                    semantic_score=score,
-                )
-            )
-        return sorted(scored, key=ranking_key)[:top_k]
+        queries = self.provider.embed([query])
+        if len(queries) != 1 or len(queries[0]) != self._dimensions:
+            raise ValueError("Embedding provider returned an invalid query vector.")
+        query_vector = queries[0]
+        query_norm = _vector_norm(query_vector)
+
+        def scored() -> Iterable[ScoredChunk]:
+            for chunk, vector, norm in zip(self.chunks, self.vectors, self._norms, strict=True):
+                score = _cosine(query_vector, vector, query_norm * norm)
+                yield ScoredChunk(chunk=chunk, score=score, semantic_score=score)
+
+        return _top_matches(scored(), top_k)
 
 
 def reciprocal_rank_fusion(

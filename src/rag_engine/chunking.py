@@ -1,6 +1,7 @@
 import re
 
 from rag_engine.models import Chunk, Document
+from rag_engine.provenance import sha256_text
 
 _TOKEN_RE = re.compile(r"\S+")
 
@@ -29,6 +30,7 @@ def chunk_document(
     for index, start in enumerate(range(0, len(tokens), step)):
         end = min(start + chunk_size, len(tokens))
         text = " ".join(tokens[start:end])
+        start_char, end_char = matches[start].start(), matches[end - 1].end()
         chunks.append(
             Chunk(
                 id=f"{document.id}::c{index}",
@@ -37,8 +39,9 @@ def chunk_document(
                 start_token=start,
                 end_token=end,
                 metadata=dict(document.metadata),
-                start_char=matches[start].start(),
-                end_char=matches[end - 1].end(),
+                start_char=start_char,
+                end_char=end_char,
+                source_span_sha256=sha256_text(document.text[start_char:end_char]),
             )
         )
         if end >= len(tokens):

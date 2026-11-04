@@ -21,6 +21,7 @@ class Chunk:
     # end-exclusive). ``None`` when a chunk was not produced by ``chunk_document``.
     start_char: int | None = None
     end_char: int | None = None
+    source_span_sha256: str | None = field(default=None, compare=False, repr=False)
 
 
 @dataclass(frozen=True)

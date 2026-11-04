@@ -22,7 +22,7 @@ from urllib.parse import urlparse
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from rag_engine.models import Document, ScoredChunk
-from rag_engine.provenance import sha256_text, source_span
+from rag_engine.provenance import sha256_text
 from rag_engine.service import RAGEngine
 
 CONTRACT_VERSION = "makma.v1"
@@ -197,16 +197,14 @@ def _retrieval_components(engine: RAGEngine) -> tuple[Any, ...]:
     return (engine.embedding_provider, engine.query_planner, engine.reranker)
 
 
-def _chunk_provenance(engine: RAGEngine, item: ScoredChunk) -> ProvenanceRef:
+def _chunk_provenance(item: ScoredChunk) -> ProvenanceRef:
     chunk = item.chunk
-    document = engine.documents.get(chunk.document_id)
-    span_text = source_span(chunk, document) if document is not None else None
-    if span_text is None:
+    if chunk.source_span_sha256 is None or chunk.start_char is None or chunk.end_char is None:
         return ProvenanceRef(kind="chunk", id=chunk.id)
     return ProvenanceRef(
         kind="chunk",
         id=chunk.id,
-        sha256=sha256_text(span_text),
+        sha256=chunk.source_span_sha256,
         span=(chunk.start_char, chunk.end_char),
     )
 
@@ -279,7 +277,7 @@ def _op_retrieve(engine: RAGEngine, payload: QueryInput) -> OpResult:
         "results": [_result_row(item) for item in results],
         "trace": _trace_dict(trace),
     }
-    provenance = [_chunk_provenance(engine, item) for item in results]
+    provenance = [_chunk_provenance(item) for item in results]
     return data, provenance, _combined_mode(*_retrieval_components(engine))
 
 
@@ -302,7 +300,7 @@ def _op_answer(engine: RAGEngine, payload: QueryInput) -> OpResult:
         "retrieved_chunk_ids": retrieved_ids,
         "trace": _trace_dict(result["trace"]),
     }
-    provenance = [_chunk_provenance(engine, by_id[chunk_id]) for chunk_id in citations]
+    provenance = [_chunk_provenance(by_id[chunk_id]) for chunk_id in citations]
     components = _retrieval_components(engine)
     if not result["abstained"]:
         components = (*components, engine.generator)

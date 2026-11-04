@@ -99,7 +99,12 @@ def index_documents(request: IndexRequest) -> dict[str, int]:
     documents = [
         Document(id=item.id, text=item.text, metadata=item.metadata) for item in request.documents
     ]
-    chunk_count = engine.index(documents)
+    try:
+        chunk_count = engine.index(documents)
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail="Index rejected the input or embeddings.") from error
+    except OSError as error:
+        raise HTTPException(status_code=503, detail="Index dependency is unavailable.") from error
     return {"documents": len(documents), "chunks": chunk_count}
 
 

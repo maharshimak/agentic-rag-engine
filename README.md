@@ -113,6 +113,17 @@ Provenance entries are `document` (ingest; SHA-256 of the full text) or `chunk` 
 
 ## Offline retrieval benchmark
 
+The lexical index stores weighted BM25 postings. Vector search remains exhaustive and
+reuses corpus norms while retaining only the top candidates. The default hash embedding is
+deterministic lexical hashing. Ranked IDs, scores and citation fields use the existing API.
+
+Index mutations build and validate a candidate snapshot before updating the document store.
+The last good snapshot remains available to queries during a rebuild. The chunk cap defaults
+to 20,000 and can be set with `RAG_MAX_INDEX_CHUNKS` or `RAGEngine(max_index_chunks=...)`.
+Read results carry the exact source-span digest from the snapshot they searched. Use one
+writing engine per document store. Custom embedding providers should support concurrent
+search and build calls. The in-memory index is rebuilt from source documents after restart.
+
 `benchmarks/retrieval_v1.json` is a hand-written synthetic corpus (12 documents, one deleted after ingestion) with 14 queries and graded judgments (0/1/2). It includes near-duplicate documents, a prompt-injection document, an identifier near-miss (`ERR_TLS_041` vs `ERR_TLS_042`), vocabulary-mismatch paraphrases, a query whose only matching document is deleted, and an unanswerable query. Judgments were written by the author of the dataset, before running the engine, and have not been independently reviewed.
 
 ```bash
