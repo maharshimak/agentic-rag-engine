@@ -7,6 +7,7 @@ from urllib.error import HTTPError
 
 import pytest
 
+from rag_engine.contracts import run_operation
 from rag_engine.embeddings import OpenAICompatibleEmbeddingProvider
 from rag_engine.models import Document
 from rag_engine.planning import OpenAICompatibleQueryPlanner
@@ -88,7 +89,18 @@ def test_concurrent_ingests_return_hashes_from_their_own_snapshots():
 
         def ingest(document, current_engine=engine, ready=barrier, result=receipts):
             ready.wait()
-            result.append(current_engine.index_with_receipt([document]))
+            envelope = run_operation(
+                "ingest",
+                {"documents": [{"id": document.id, "text": document.text}]},
+                engine=current_engine,
+            )
+            assert envelope["status"] == "ok"
+            result.append(
+                (
+                    envelope["data"]["indexed_chunks"],
+                    envelope["data"]["index_fingerprint"],
+                )
+            )
 
         workers = [Thread(target=ingest, args=(document,)) for document in (a, b)]
         for worker in workers:
