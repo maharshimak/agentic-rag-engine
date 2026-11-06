@@ -251,12 +251,12 @@ def _op_ingest(engine: RAGEngine, payload: IngestInput) -> OpResult:
         Document(id=item.id, text=item.text, metadata=dict(item.metadata))
         for item in payload.documents
     ]
-    chunk_count = engine.index(documents)
+    chunk_count, fingerprint = engine.index_with_receipt(documents)
     data = {
         "documents": len(documents),
         "document_ids": [document.id for document in documents],
         "indexed_chunks": chunk_count,
-        "index_fingerprint": engine.index_fingerprint(),
+        "index_fingerprint": fingerprint,
     }
     provenance = [
         ProvenanceRef(

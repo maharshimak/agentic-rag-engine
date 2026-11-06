@@ -77,7 +77,9 @@ class RAGEngine:
             self._agent = agent
             self._fingerprint = None
 
-    def index(self, documents: list[Document]) -> int:
+    def _index_transaction(
+        self, documents: list[Document], *, with_receipt: bool
+    ) -> tuple[int, str | None]:
         if len({document.id for document in documents}) != len(documents):
             raise ValueError("Document IDs must be unique within an index batch.")
         if any(not document.id.strip() or not document.text.strip() for document in documents):
@@ -88,7 +90,19 @@ class RAGEngine:
             if documents and self.document_store is not None:
                 self.document_store.upsert_many(documents)
             self._publish(next_documents, agent)
-            return chunk_count
+            # Keep the receipt inside the writer transaction. Otherwise a second
+            # ingest can publish a newer index before the caller reads its hash.
+            fingerprint = self.index_fingerprint() if with_receipt else None
+            return chunk_count, fingerprint
+
+    def index(self, documents: list[Document]) -> int:
+        count, _ = self._index_transaction(documents, with_receipt=False)
+        return count
+
+    def index_with_receipt(self, documents: list[Document]) -> tuple[int, str | None]:
+        """Return the count and hash from the same committed index snapshot."""
+
+        return self._index_transaction(documents, with_receipt=True)
 
     def delete(self, document_id: str) -> bool:
         with self._writer_lock:

@@ -4,6 +4,8 @@ import json
 from dataclasses import dataclass
 from urllib import request
 
+from rag_engine.http_security import open_without_redirect
+
 
 @dataclass(slots=True)
 class OpenAICompatibleQueryPlanner:
@@ -52,7 +54,7 @@ class OpenAICompatibleQueryPlanner:
             headers["Authorization"] = f"Bearer {self.api_key}"
         endpoint = self.base_url.rstrip("/") + "/chat/completions"
         req = request.Request(endpoint, data=payload, headers=headers, method="POST")
-        with request.urlopen(req, timeout=self.timeout_seconds) as response:
+        with open_without_redirect(req, timeout=self.timeout_seconds) as response:
             body = json.loads(response.read().decode())
         raw = str(body["choices"][0]["message"]["content"]).strip()
         return self.parse(query, raw, max_queries=limit)
