@@ -7,8 +7,10 @@ from urllib.error import HTTPError
 
 import pytest
 
+from rag_engine.context import ContextBlock
 from rag_engine.contracts import run_operation
 from rag_engine.embeddings import OpenAICompatibleEmbeddingProvider
+from rag_engine.generation import OpenAICompatibleChatGenerator
 from rag_engine.models import Document
 from rag_engine.planning import OpenAICompatibleQueryPlanner
 from rag_engine.service import RAGEngine
@@ -27,16 +29,25 @@ def _serve(handler: type[BaseHTTPRequestHandler]):
         worker.join(timeout=3)
 
 
-@pytest.mark.parametrize("kind", ["embeddings", "planner"])
-def test_authenticated_adapter_does_not_follow_redirect_to_other_origin(kind):
+@pytest.mark.parametrize("kind", ["embeddings", "planner", "generator"])
+@pytest.mark.parametrize("redirect_status", [301, 302, 303, 307, 308])
+def test_authenticated_adapter_does_not_follow_redirect_to_other_origin(
+    kind, redirect_status
+):
     forwarded: list[str | None] = []
 
     class Sink(BaseHTTPRequestHandler):
-        def do_GET(self):
+        def _capture(self):
             forwarded.append(self.headers.get("Authorization"))
             self.send_response(200)
             self.end_headers()
             self.wfile.write(b"{}")
+
+        def do_GET(self):
+            self._capture()
+
+        def do_POST(self):
+            self._capture()
 
         def log_message(self, *args):
             pass
@@ -45,7 +56,7 @@ def test_authenticated_adapter_does_not_follow_redirect_to_other_origin(kind):
 
         class Redirect(BaseHTTPRequestHandler):
             def do_POST(self):
-                self.send_response(302)
+                self.send_response(redirect_status)
                 self.send_header("Location", sink_url + "/redirect-target")
                 self.end_headers()
 
@@ -58,15 +69,22 @@ def test_authenticated_adapter_does_not_follow_redirect_to_other_origin(kind):
                     origin_url, "test-model", api_key="synthetic-test-only"
                 )
                 run = lambda: adapter.embed(["a"])
-            else:
+            elif kind == "planner":
                 adapter = OpenAICompatibleQueryPlanner(
                     origin_url, "test-model", api_key="synthetic-test-only"
                 )
                 run = lambda: adapter.plan("question")
+            else:
+                adapter = OpenAICompatibleChatGenerator(
+                    origin_url, "test-model", api_key="synthetic-test-only"
+                )
+                run = lambda: adapter.generate(
+                    "question", ContextBlock("evidence", [], 1)
+                )
 
             with pytest.raises(HTTPError) as error:
                 run()
-            assert error.value.code == 302
+            assert error.value.code == redirect_status
             assert forwarded == []
 
 
