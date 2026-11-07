@@ -148,6 +148,37 @@ def test_failed_delete_rebuild_leaves_durable_and_live_documents(tmp_path):
     assert set(engine.documents) == {"keep", "remove"}
 
 
+
+def test_sqlite_reopen_preserves_successful_updates_and_deletions(tmp_path):
+    """Live, durable, and reconstructed indexes must agree after writes."""
+    db_path = tmp_path / "docs.db"
+    store = SQLiteDocumentStore(db_path)
+    engine = RAGEngine(document_store=store)
+    engine.index(
+        [Document("first", "original evidence"), Document("second", "keep evidence")]
+    )
+    engine.index([Document("first", "replacement evidence")])
+
+    expected = {
+        "first": Document("first", "replacement evidence"),
+        "second": Document("second", "keep evidence"),
+    }
+    assert engine.documents == expected
+    assert store.list_documents() == [expected["first"], expected["second"]]
+
+    reopened = RAGEngine(document_store=SQLiteDocumentStore(db_path))
+    assert reopened.documents == expected
+    assert reopened.index_fingerprint() == engine.index_fingerprint()
+    assert reopened.retrieve("replacement")[0][0].chunk.document_id == "first"
+
+    assert engine.delete("first")
+    reopened_after_delete = RAGEngine(document_store=SQLiteDocumentStore(db_path))
+    assert reopened_after_delete.documents == engine.documents
+    assert reopened_after_delete.documents == {"second": expected["second"]}
+    assert reopened_after_delete.index_fingerprint() == engine.index_fingerprint()
+    assert reopened_after_delete.retrieve("keep")[0][0].chunk.document_id == "second"
+
+
 def test_postings_preserve_repeated_term_scores_and_tie_breaks():
     chunks = [Chunk(name, name, "alpha beta", 0, 2) for name in ("z", "a")]
     index = BM25Index(chunks)

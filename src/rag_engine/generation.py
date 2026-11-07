@@ -3,6 +3,7 @@ from typing import Protocol
 from urllib import request
 
 from rag_engine.context import ContextBlock
+from rag_engine.http_security import open_without_redirect
 
 
 class Generator(Protocol):
@@ -59,6 +60,6 @@ class OpenAICompatibleChatGenerator:
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
         req = request.Request(self.endpoint, data=payload, headers=headers, method="POST")
-        with request.urlopen(req, timeout=self.timeout_seconds) as response:
+        with open_without_redirect(req, timeout=self.timeout_seconds) as response:
             data = json.loads(response.read().decode())
         return data["choices"][0]["message"]["content"]
